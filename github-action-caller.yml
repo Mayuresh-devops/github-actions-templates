@@ -1,0 +1,80 @@
+name: Deploy Middleware
+
+on:
+  workflow_dispatch:
+    inputs:
+      deploy_host:
+        description: "Comma-separated deploy hosts"
+        required: true
+        default: "192.168.1.1" #Deployment server IP
+
+jobs:
+  # Job 1: Inject secrets into properties file
+  inject:
+    runs-on: self-hosted
+    environment: UAT
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Inject secrets into properties file
+        shell: bash
+        env:
+          ADMIN_PASS: ${{ secrets.ADMIN_PASS }}
+          API_KEY: ${{ secrets.API_KEY }}
+          XAPI_KEY: ${{ secrets.XAPI_KEY }}
+          API2_KEY: ${{ secrets.API2_KEY }}
+          AUTH_PASSWORD: ${{ secrets.AUTH_PASSWORD }}
+          CHART_API_KEY: ${{ secrets.CHART_API_KEY }}
+          CHART_SECRET_KEY: ${{ secrets.CHART_SECRET_KEY }}
+          CMOTS_TOKEN: ${{ secrets.CMOTS_TOKEN }}
+          EDIS_PASS: ${{ secrets.EDIS_PASS }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          LEADSQUARED_KEY: ${{ secrets.LEADSQUARED_KEY }}
+          LEADSQUARED_SECRET_KEY: ${{ secrets.LEADSQUARED_SECRET_KEY }}
+          MYSQL_PASS: ${{ secrets.MYSQL_PASS }}
+          MYSQL_USER: ${{ secrets.MYSQL_USER }}
+          PASSWORD: ${{ secrets.PASSWORD }}
+          REDASH_TOKEN: ${{ secrets.REDASH_TOKEN }}
+          SQL_PASS: ${{ secrets.SQL_PASS }}
+          TRADE_PASS: ${{ secrets.TRADE_PASS }}
+          PROTIPS_XAPI_KEY: ${{ secrets.PROTIPS_XAPI_KEY }}
+        run: |
+          FILE=applicationMiddleware_uat.properties
+
+          if [ ! -f "$FILE" ]; then
+            echo "ERROR: $FILE not found"
+            exit 1
+          fi
+
+          for key in ADMIN_PASS API_KEY XAPI_KEY API2_KEY AUTH_PASSWORD CHART_API_KEY CHART_SECRET_KEY CMOTS_TOKEN \
+                     EDIS_PASS JWT_SECRET LEADSQUARED_KEY LEADSQUARED_SECRET_KEY MYSQL_PASS MYSQL_USER PASSWORD \
+                     REDASH_TOKEN SQL_PASS TRADE_PASS PROTIPS_XAPI_KEY; do
+            value="${!key:-}"
+            if [ -z "$value" ]; then
+              echo "WARNING: $key not set, skipping"
+              continue
+            fi
+            echo "::add-mask::$value"
+            sed -i "s|\${$key}|$value|g" "$FILE"
+          done
+
+      - name: Upload injected properties file
+        uses: actions/upload-artifact@v4
+        with:
+          name: injected-properties
+          path: applicationMiddleware_uat.properties
+          retention-days:
+
+  # Job 2: Deploy via template
+  deploy:
+    needs: inject # Ensures this runs after secrets are injected
+    uses: github-actions-templates/.github/workflows/java-onprem-cicd-template.yml@uat
+    with:
+      environment: UAT
+      service_name: Middleware
+      base_dir: /home/ticket/UAT/Middleware
+      jar_name: Middleware-1.0.0.jar
+      properties_file: applicationMiddleware_uat.properties
+      systemd_service: Middleware.service
+      deploy_hosts: ${{ github.event.inputs.deploy_host }}
+      health_url: https://channel1.stoxbox.in:9001/stxmiddlewarecheck/health
